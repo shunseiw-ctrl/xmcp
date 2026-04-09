@@ -200,6 +200,15 @@ def run_oauth1_flow() -> tuple[str, str]:
     access_secret = access_token.get("oauth_token_secret")
     if not access_key or not access_secret:
         raise RuntimeError("Failed to obtain OAuth access token.")
+    # Persist tokens to .env for headless restarts
+    env_path = Path(__file__).resolve().parent / ".env"
+    env_content = env_path.read_text() if env_path.exists() else ""
+    if "X_OAUTH_ACCESS_TOKEN=" not in env_content:
+        with open(env_path, "a") as f:
+            f.write(f"\n# Persisted OAuth1 tokens (auto-saved)\n")
+            f.write(f"X_OAUTH_ACCESS_TOKEN={access_key}\n")
+            f.write(f"X_OAUTH_ACCESS_TOKEN_SECRET={access_secret}\n")
+        LOGGER.info("Persisted OAuth1 tokens to .env")
     return access_key, access_secret
 
 
@@ -314,7 +323,14 @@ def build_oauth1_client() -> OAuth1Client:
         raise RuntimeError(
             "Missing X_OAUTH_CONSUMER_KEY or X_OAUTH_CONSUMER_SECRET for OAuth1 signing."
         )
-    access_token, access_secret = run_oauth1_flow()
+    # Use persisted tokens if available, otherwise run browser flow
+    env_access_token = os.getenv("X_OAUTH_ACCESS_TOKEN", "").strip()
+    env_access_secret = os.getenv("X_OAUTH_ACCESS_TOKEN_SECRET", "").strip()
+    if env_access_token and env_access_secret:
+        access_token, access_secret = env_access_token, env_access_secret
+        LOGGER.info("Using persisted OAuth1 tokens from .env")
+    else:
+        access_token, access_secret = run_oauth1_flow()
     if is_truthy(os.getenv("X_OAUTH_PRINT_TOKENS", "0")):
         print("OAuth1 access token:", access_token)
         print("OAuth1 access token secret:", access_secret)
@@ -458,8 +474,8 @@ def create_mcp() -> FastMCP:
 
 
 def main() -> None:
-    host = os.getenv("MCP_HOST", "127.0.0.1")
-    port = int(os.getenv("MCP_PORT", "8000"))
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("MCP_PORT", "8000")))
     mcp = create_mcp()
     mcp.run(transport="http", host=host, port=port)
 
